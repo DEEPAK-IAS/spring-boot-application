@@ -55,3 +55,5 @@ application-prod.properties
 .DS_Store
 Thumbs.db
 logs/
+
+src/main/resources/application.properties
