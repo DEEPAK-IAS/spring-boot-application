@@ -7,6 +7,8 @@ COPY mvnw .
 COPY .mvn .mvn
 COPY pom.xml .
 
+RUN chmod +x mvnw
+
 # 2. Download dependencies *separately* and cache them securely
 RUN ./mvnw dependency:go-offline -B
 
