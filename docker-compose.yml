@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  postgres-db:
+    image: postgres:15-alpine
+    container_name: ecommerce_postgres
+    environment:
+      POSTGRES_DB: user_api_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ecommerce-net
+
+  spring-app:
+    build: .
+    container_name: ecommerce_spring_boot
+    ports:
+      - "8081:8081"
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-db:5432/user_api_db
+      - SPRING_DATASOURCE_USERNAME=postgres
+      - SPRING_DATASOURCE_PASSWORD=root
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+      - CLOUDINARY_CLOUD_NAME=pqwlijsr
+      - CLOUDINARY_API_KEY=187921894841316
+      - CLOUDINARY_API_SECRET=HgOyYBEMGTVdiDi-MZCnX1Fnj30
+    depends_on:
+      - postgres-db
+    networks:
+      - ecommerce-net
+
+volumes:
+  postgres_data:
+
+networks:
+  ecommerce-net:
+    driver: bridge

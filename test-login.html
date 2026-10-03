@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Firebase Social Login Tester</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 760px; margin: 30px auto; padding: 0 16px; color: #222; }
+  h1 { font-size: 22px; }
+  h2 { font-size: 16px; margin-top: 28px; border-bottom: 1px solid #ddd; padding-bottom: 6px; }
+  label { display: block; font-size: 13px; margin: 10px 0 4px; color: #555; }
+  input, textarea, select { width: 100%; box-sizing: border-box; padding: 8px; font-family: monospace; font-size: 13px; }
+  textarea { height: 150px; }
+  button { padding: 9px 16px; margin: 6px 6px 0 0; border: 0; border-radius: 6px; cursor: pointer; background: #2563eb; color: #fff; font-size: 14px; }
+  button.secondary { background: #6b7280; }
+  button.red { background: #dc2626; }
+  pre { background: #111; color: #d1fae5; padding: 12px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; max-height: 260px; overflow: auto; font-size: 12px; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .row > .small { flex: 0 0 110px; }
+</style>
+</head>
+<body>
+
+<h1>Firebase Social Login Tester</h1>
+
+<h2>1. Firebase config</h2>
+<label>Paste your web app config (JSON). Firebase Console → Project settings → Your apps → Web app</label>
+<textarea id="config" spellcheck="false">{
+  "apiKey": "YOUR_API_KEY",
+  "authDomain": "YOUR_PROJECT.firebaseapp.com",
+  "projectId": "YOUR_PROJECT_ID",
+  "appId": "YOUR_APP_ID"
+}</textarea>
+<button id="saveConfig" class="secondary">Save &amp; initialize</button>
+
+<h2>2. Sign in</h2>
+<button id="google">Google</button>
+<button id="facebook">Facebook</button>
+<button id="github">GitHub</button>
+<button id="logout" class="red">Sign out</button>
+<p id="status">Not signed in</p>
+
+<h2>3. Firebase ID token</h2>
+<pre id="token">-</pre>
+<button id="copy" class="secondary">Copy token</button>
+<button id="refresh" class="secondary">Force refresh token</button>
+
+<h2>4. Call your Spring Boot API</h2>
+<div class="row">
+  <div class="small">
+    <label>Method</label>
+    <select id="method"><option>POST</option><option>GET</option><option>PUT</option><option>DELETE</option></select>
+  </div>
+  <div>
+    <label>URL</label>
+    <input id="url" value="http://localhost:8080/api/auth/firebase">
+  </div>
+</div>
+<label>Send token as</label>
+<select id="mode">
+  <option value="header">Authorization: Bearer header</option>
+  <option value="body">JSON body {"idToken": "..."}</option>
+  <option value="both">Both</option>
+</select>
+<label>Extra JSON body (optional, merged into the body)</label>
+<input id="extra" placeholder='{"deviceId":"test"}'>
+<button id="call">Send request</button>
+
+<h2>Response</h2>
+<pre id="out">-</pre>
+
+<script type="module">
+import { initializeApp, getApps, deleteApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import {
+  getAuth, signInWithPopup, signOut, onAuthStateChanged,
+  GoogleAuthProvider, FacebookAuthProvider, GithubAuthProvider
+} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+
+const $ = id => document.getElementById(id);
+let auth = null;
+
+// restore saved config
+try {
+  const saved = localStorage.getItem("fb_config");
+  if (saved) $("config").value = saved;
+} catch (e) {}
+
+let unsubscribe = null;
+
+async function init() {
+  try {
+    const cfg = JSON.parse($("config").value);
+
+    // remove any previously created app so re-initializing with a new config works
+    if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+    for (const existing of getApps()) await deleteApp(existing);
+
+    const app = initializeApp(cfg);
+    auth = getAuth(app);
+    try { localStorage.setItem("fb_config", $("config").value); } catch (e) {}
+    unsubscribe = onAuthStateChanged(auth, async user => {
+      if (user) {
+        $("status").textContent = `Signed in: ${user.displayName || ""} <${user.email || "no email"}> (uid: ${user.uid})`;
+        $("token").textContent = await user.getIdToken();
+      } else {
+        $("status").textContent = "Not signed in";
+        $("token").textContent = "-";
+      }
+    });
+    $("status").textContent = "Firebase initialized. Choose a provider.";
+  } catch (e) {
+    $("status").textContent = "Config error: " + e.message;
+  }
+}
+
+async function login(provider) {
+  if (!auth) return alert("Save & initialize config first");
+  try {
+    const result = await signInWithPopup(auth, provider);
+    console.log("Login result", result);
+  } catch (e) {
+    $("status").textContent = `Login failed: ${e.code} - ${e.message}`;
+  }
+}
+
+$("saveConfig").onclick = init;
+$("google").onclick = () => login(new GoogleAuthProvider());
+$("facebook").onclick = () => login(new FacebookAuthProvider());
+$("github").onclick = () => login(new GithubAuthProvider());
+$("logout").onclick = () => auth && signOut(auth);
+
+$("copy").onclick = async () => {
+  await navigator.clipboard.writeText($("token").textContent);
+  $("copy").textContent = "Copied!";
+  setTimeout(() => $("copy").textContent = "Copy token", 1200);
+};
+
+$("refresh").onclick = async () => {
+  if (auth?.currentUser) $("token").textContent = await auth.currentUser.getIdToken(true);
+};
+
+$("call").onclick = async () => {
+  if (!auth?.currentUser) return alert("Sign in first");
+  const token = await auth.currentUser.getIdToken();
+  const method = $("method").value;
+  const mode = $("mode").value;
+  const headers = { "Content-Type": "application/json" };
+  if (mode === "header" || mode === "both") headers["Authorization"] = "Bearer " + token;
+
+  const opts = { method, headers };
+  if (method !== "GET" && method !== "DELETE") {
+    let body = {};
+    try { if ($("extra").value.trim()) body = JSON.parse($("extra").value); } catch (e) { return alert("Extra body is not valid JSON"); }
+    if (mode === "body" || mode === "both") body.idToken = token;
+    opts.body = JSON.stringify(body);
+  }
+
+  $("out").textContent = "Sending...";
+  try {
+    const res = await fetch($("url").value, opts);
+    const text = await res.text();
+    let pretty = text;
+    try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch (e) {}
+    $("out").textContent = `HTTP ${res.status} ${res.statusText}\n\n${pretty}`;
+  } catch (e) {
+    $("out").textContent = "Request failed: " + e.message + "\n\nUsually this is CORS or the server is not running.";
+  }
+};
+
+init();
+</script>
+</body>
+</html>
